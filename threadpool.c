@@ -21,8 +21,8 @@ typedef struct {
 typedef struct {
     pthread_t *threads;              // pointer to the array of thread handles
     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
-    pthread_mutex_t job_mutex;       // job mutex lock
-    pthread_cond_t job_cond;         // job condition 
+    pthread_mutex_t mutex;       // job mutex lock
+    pthread_cond_t condition;         // job condition 
     unsigned int num_threads;        // number of threads 
     bool destroy_flag;               // destroy flag
 } ThreadPool_t;
@@ -49,8 +49,8 @@ ThreadPool_t *ThreadPool_create(unsigned int num) {
     tp->jobs.head = NULL;
     tp->jobs.size = 0;
     // Initialize Mutex Lock and condition
-    pthread_mutex_init(&tp->job_mutex, NULL);
-    pthread_cond_init(&tp->job_cond, NULL);
+    pthread_mutex_init(&tp->mutex, NULL);
+    pthread_cond_init(&tp->condition, NULL);
     
     tp->num_threads = num;
     tp->destroy_flag = false;
@@ -72,10 +72,10 @@ void ThreadPool_destroy(ThreadPool_t *tp) {
     ThreadPool_check(tp);
 
     //Lock mutex then signal to remaining threads to exit waiting
-    pthread_mutex_lock(&tp->job_mutex);
+    pthread_mutex_lock(&tp->mutex);
     tp->destroy_flag = true;
-    pthread_cond_broadcast(&tp->job_cond);
-    pthread_mutex_unlock(&tp->job_mutex);
+    pthread_cond_broadcast(&tp->condition);
+    pthread_mutex_unlock(&tp->mutex);
 
     //Wait for threads to terminate
     for (unsigned int i = 0; i < tp->num_threads; i++) {
@@ -92,8 +92,8 @@ void ThreadPool_destroy(ThreadPool_t *tp) {
     // }
 
     //Destroy Mutex, condition and free memory
-    pthread_mutex_destroy(&tp->job_mutex);
-    pthread_cond_destroy(&tp->job_cond);
+    pthread_mutex_destroy(&tp->mutex);
+    pthread_cond_destroy(&tp->condition);
     free(tp);
 }
 
@@ -115,7 +115,7 @@ bool ThreadPool_add_job(ThreadPool_t *tp, thread_func_t func, void *arg) {
     job->arg = arg;
     job->next = NULL;
 
-    pthread_mutex_lock(&tp->job_mutex);
+    pthread_mutex_lock(&tp->mutex);
 
     if (tp->jobs.head == NULL) {
         // Only 1 job in the queue, head and tail point to the same job
@@ -129,8 +129,8 @@ bool ThreadPool_add_job(ThreadPool_t *tp, thread_func_t func, void *arg) {
     }
     tp->jobs.size++;
     // Signaling condition and unlock since new Job available
-    pthread_cond_signal(&tp->job_cond);
-    pthread_mutex_unlock(&tp->job_mutex);
+    pthread_cond_signal(&tp->condition);
+    pthread_mutex_unlock(&tp->mutex);
 
     return true;
 }
@@ -143,15 +143,15 @@ bool ThreadPool_add_job(ThreadPool_t *tp, thread_func_t func, void *arg) {
 *     ThreadPool_job_t* - Next job to run
 */
 ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
-    pthread_mutex_lock(&tp->job_mutex);
+    pthread_mutex_lock(&tp->mutex);
 
     //Wait while no available jobs
     while (tp->jobs.size == 0 && !tp->destroy_flag) {
-        pthread_cond_wait(&tp->job_cond, &tp->job_mutex);
+        pthread_cond_wait(&tp->condition, &tp->mutex);
     }
     //Flag set to destroy threadpool
     if (tp->destroy_flag && tp->jobs.size == 0) {
-        pthread_mutex_unlock(&tp->job_mutex);
+        pthread_mutex_unlock(&tp->mutex);
         return NULL;
     }
 
@@ -163,10 +163,10 @@ ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
     }
     //Signal for Check when size is empty
     if (tp->jobs.size == 0) {
-        pthread_cond_signal(&tp->job_cond);
+        pthread_cond_signal(&tp->condition);
     }
 
-    pthread_mutex_unlock(&tp->job_mutex);
+    pthread_mutex_unlock(&tp->mutex);
     return job;
 }
 
@@ -193,10 +193,10 @@ void *Thread_run(ThreadPool_t *tp) {
 */
 void ThreadPool_check(ThreadPool_t *tp) {
 
-    pthread_mutex_lock(&tp->job_mutex);
+    pthread_mutex_lock(&tp->mutex);
     //Wait until signal is sent 
     while (tp->jobs.size > 0) {
-        pthread_cond_wait(&tp->job_cond, &tp->job_mutex);
+        pthread_cond_wait(&tp->condition, &tp->mutex);
     }
-    pthread_mutex_unlock(&tp->job_mutex);
+    pthread_mutex_unlock(&tp->mutex);
 }
