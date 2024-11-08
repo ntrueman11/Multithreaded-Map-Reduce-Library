@@ -5,6 +5,30 @@
 typedef void (*Mapper)(char *file_name);
 typedef void (*Reducer)(char *key, unsigned int partition_idx);
 
+typedef struct Dictionary {
+    char *key;
+    char *value;
+    struct Dictionary *next; // Next node in the list
+} Dictionary;
+
+// Structure for a partition holding a linked list of Dictionary nodes and a mutex for thread safety
+typedef struct {
+    Dictionary *head;         // Head of the linked list
+    Dictionary *tail;         // Tail of the linked list
+    Dictionary *position;     // Current position
+    pthread_mutex_t mutex;    // Mutex for partition
+} Partition;
+
+typedef struct {
+    unsigned int partition_idx;
+    Reducer reducer;
+} MR_Reduce_Args;
+
+typedef struct {
+    char *filename;
+    unsigned int file_size;
+} File;
+
 // library functions that must be implemented
 
 /**
