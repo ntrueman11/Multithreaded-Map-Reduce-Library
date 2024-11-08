@@ -1,35 +1,15 @@
-// threadpool.c
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include "threadpool.h"
 
-// typedef void (*thread_func_t)(void *arg);
 
-// typedef struct ThreadPool_job_t {
-//     thread_func_t func;              // function pointer
-//     void *arg;                       // arguments for that function
-//     struct ThreadPool_job_t *next;   // pointer to the next job in the queue
-// } ThreadPool_job_t;
-
-// typedef struct {
-//     unsigned int size;               // jobs in the queue
-//     ThreadPool_job_t *head;          // pointer to the first (shortest) job
-//     ThreadPool_job_t *tail;          // pointer to the last job
-// } ThreadPool_job_queue_t;
-
-// typedef struct {
-//     pthread_t *threads;              // pointer to the array of thread handles
-//     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
-//     pthread_mutex_t mutex;           // job mutex lock
-//     pthread_cond_t condition;        // job condition 
-//     unsigned int num_threads;        // number of threads 
-//     bool destroy_flag;               // destroy flag
-// } ThreadPool_t;
-
-
-
+/**
+* Wrapper function for running a thread.
+* Parameters:
+*     arg - Pointer to the ThreadPool_t struc.
+*/
 void *Run_Wrapper(void *arg) {
     return Thread_run((ThreadPool_t *) arg);
 }
