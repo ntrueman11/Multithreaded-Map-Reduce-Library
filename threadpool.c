@@ -3,30 +3,36 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "threadpool.h"
 
-typedef void (*thread_func_t)(void *arg);
+// typedef void (*thread_func_t)(void *arg);
 
-typedef struct ThreadPool_job_t {
-    thread_func_t func;              // function pointer
-    void *arg;                       // arguments for that function
-    struct ThreadPool_job_t *next;   // pointer to the next job in the queue
-} ThreadPool_job_t;
+// typedef struct ThreadPool_job_t {
+//     thread_func_t func;              // function pointer
+//     void *arg;                       // arguments for that function
+//     struct ThreadPool_job_t *next;   // pointer to the next job in the queue
+// } ThreadPool_job_t;
 
-typedef struct {
-    unsigned int size;               // jobs in the queue
-    ThreadPool_job_t *head;          // pointer to the first (shortest) job
-    ThreadPool_job_t *tail;          // pointer to the last job
-} ThreadPool_job_queue_t;
+// typedef struct {
+//     unsigned int size;               // jobs in the queue
+//     ThreadPool_job_t *head;          // pointer to the first (shortest) job
+//     ThreadPool_job_t *tail;          // pointer to the last job
+// } ThreadPool_job_queue_t;
 
-typedef struct {
-    pthread_t *threads;              // pointer to the array of thread handles
-    ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
-    pthread_mutex_t mutex;           // job mutex lock
-    pthread_cond_t condition;        // job condition 
-    unsigned int num_threads;        // number of threads 
-    bool destroy_flag;               // destroy flag
-} ThreadPool_t;
+// typedef struct {
+//     pthread_t *threads;              // pointer to the array of thread handles
+//     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
+//     pthread_mutex_t mutex;           // job mutex lock
+//     pthread_cond_t condition;        // job condition 
+//     unsigned int num_threads;        // number of threads 
+//     bool destroy_flag;               // destroy flag
+// } ThreadPool_t;
 
+
+
+void *Run_Wrapper(void *arg) {
+    return Thread_run((ThreadPool_t *) arg);
+}
 /**
 * C style constructor for creating a new ThreadPool object
 * Parameters:
@@ -51,12 +57,13 @@ ThreadPool_t *ThreadPool_create(unsigned int num) {
     // Initialize Mutex Lock and condition
     pthread_mutex_init(&tp->mutex, NULL);
     pthread_cond_init(&tp->condition, NULL);
+    pthread_cond_init(&tp->check_condition, NULL);
     
     tp->num_threads = num;
     tp->destroy_flag = false;
 
     for (unsigned int i = 0; i < num; i++) {
-        pthread_create(&tp->threads[i], NULL, Thread_run, tp);
+        pthread_create(&tp->threads[i], NULL, Run_Wrapper, tp);
     }
 
     return tp;
@@ -84,6 +91,7 @@ void ThreadPool_destroy(ThreadPool_t *tp) {
     //Destroy Mutex, condition and free memory
     pthread_mutex_destroy(&tp->mutex);
     pthread_cond_destroy(&tp->condition);
+    pthread_cond_destroy(&tp->check_condition);
     free(tp);
 }
 
@@ -133,18 +141,6 @@ bool ThreadPool_add_job(ThreadPool_t *tp, thread_func_t func, void *arg) {
 *     ThreadPool_job_t* - Next job to run
 */
 ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
-    pthread_mutex_lock(&tp->mutex);
-
-    //Wait while no available jobs
-    while (tp->jobs.size == 0 && !tp->destroy_flag) {
-        pthread_cond_wait(&tp->condition, &tp->mutex);
-    }
-    //Flag set to destroy threadpool
-    if (tp->destroy_flag && tp->jobs.size == 0) {
-        pthread_mutex_unlock(&tp->mutex);
-        return NULL;
-    }
-
     ThreadPool_job_t *job = tp->jobs.head;
     // Set current head to next job
     if (job != NULL) {
@@ -153,7 +149,7 @@ ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
     }
     //Signal for Check when size is empty
     if (tp->jobs.size == 0) {
-        pthread_cond_signal(&tp->condition);
+        pthread_cond_signal(&tp->check_condition);
     }
 
     pthread_mutex_unlock(&tp->mutex);
@@ -167,13 +163,26 @@ ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
 *     tp - Pointer to the ThreadPool object containing this thread
 */
 void *Thread_run(ThreadPool_t *tp) {
-    while (!tp->destroy_flag) {
-        while (tp->jobs.size == 0)
-        {
+    while (true) {
+        ThreadPool_job_t *job;
+
+        pthread_mutex_lock(&tp->mutex);
+        
+        // Wait until there’s a job available
+        while (tp->jobs.size == 0 && !tp->destroy_flag) {
             pthread_cond_wait(&tp->condition, &tp->mutex);
         }
-        ThreadPool_job_t *job = ThreadPool_get_job(tp);
-        if(job != NULL) { 
+        
+        // Check if we should exit due to destroy_flag
+        if (tp->destroy_flag && tp->jobs.size == 0) {
+            pthread_mutex_unlock(&tp->mutex);
+            break;
+        }
+
+        job = ThreadPool_get_job(tp);
+        pthread_mutex_unlock(&tp->mutex);
+        
+        if (job != NULL) {
             job->func(job->arg);
             free(job);
         }
@@ -191,7 +200,7 @@ void ThreadPool_check(ThreadPool_t *tp) {
     pthread_mutex_lock(&tp->mutex);
     //Wait until signal is sent 
     while (tp->jobs.size > 0) {
-        pthread_cond_wait(&tp->condition, &tp->mutex);
+        pthread_cond_wait(&tp->check_condition, &tp->mutex);
     }
     pthread_mutex_unlock(&tp->mutex);
 }
