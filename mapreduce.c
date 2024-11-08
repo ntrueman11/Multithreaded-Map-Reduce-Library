@@ -119,13 +119,25 @@ void MR_Emit(char *key, char *value) {
     dict->value = strdup(value);
     dict->next = NULL;
 
-    // // Insert the new node at the end of the list
-    if (partition[index].head == NULL) {
+    // Not ordered correct or Partition empty
+    if (partition[index].head == NULL || strcmp(partition[index].head->key, key) > 0) {
+        dict->next = partition[index].head;
         partition[index].head = dict;
-        partition[index].tail = dict;
+        if (partition[index].tail == NULL) {
+            partition[index].tail = dict;
+        }
     } else {
-        partition[index].tail->next = dict;
-        partition[index].tail = dict;
+        //Find Alphabetical position in list
+        Dictionary *current = partition[index].head;
+        while (current->next != NULL && strcmp(current->next->key, key) < 0) {
+            current = current->next;
+        }
+        dict->next = current->next;
+        current->next = dict;
+
+        if (current == partition[index].tail) {
+            partition[index].tail = dict;
+        }
     }
 
     pthread_mutex_unlock(&partition[index].mutex);
