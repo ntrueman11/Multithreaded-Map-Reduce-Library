@@ -22,6 +22,7 @@ typedef struct {
     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
     pthread_mutex_t mutex;           // job mutex lock
     pthread_cond_t condition;        // job condition 
+    pthread_cond_t check_condition;  // Check condition
     unsigned int num_threads;        // number of threads 
     bool destroy_flag;               // destroy flag
 } ThreadPool_t;
