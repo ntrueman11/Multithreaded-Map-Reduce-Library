@@ -1,5 +1,3 @@
-.PHONY: clean valgrind
-
 wordcount: distwc.o mapreduce.o threadpool.o
 	gcc -Wall -Werror -std=c11 -pthread distwc.o mapreduce.o threadpool.o -o wordcount
 
