@@ -7,41 +7,20 @@
 #include <sys/stat.h>
 #include "mapreduce.h"
 #include <ctype.h>
-// function pointer typedefs
-typedef void (*Mapper)(char *file_name);
-typedef void (*Reducer)(char *key, unsigned int partition_idx);
-
-typedef struct Dictionary {
-    char *key;
-    char *value;
-    struct Dictionary *next; // Next node in the list
-} Dictionary;
-
-// Structure for a partition holding a linked list of Dictionary nodes and a mutex for thread safety
-typedef struct {
-    Dictionary *head;         // Head of the linked list
-    Dictionary *tail;         // Tail of the linked list
-    Dictionary *position;     // Current position
-    pthread_mutex_t mutex;    // Mutex for partition
-} Partition;
-
-typedef struct {
-    unsigned int partition_idx;
-    Reducer reducer;
-} MR_Reduce_Args;
-
-typedef struct {
-    char *filename;
-    unsigned int file_size;
-} File;
 
 // Globals for Partitions
-
 Partition *partition;
 unsigned int num_partitions;
 Dictionary **curr_partition_arr;
 
-
+/**
+ * Compares the file sizes of two File structures.
+ * Parameters:
+ * a - Pointer to the first File structure.
+ * b - Pointer to the second File structure.
+ * Return:
+ * Positive if file size of a > b, negative if a < b, 0 if equal.
+ */
 int compare_size(const void *a, const void *b)
 {
     File *file = (File *)a;
@@ -211,7 +190,7 @@ char *MR_GetNext(char *key, unsigned int partition_idx) {
     while (current_node != NULL) {
         if (strcmp(current_node->key, key) == 0) {
             curr_partition_arr[partition_idx] = current_node->next;
-            return strdup(current_node->value);
+            return strdup(current_node->value); //Duplicate to solve Mem leak
         } else if (strcmp(current_node->key, key) > 0) {
             return NULL;
         }
