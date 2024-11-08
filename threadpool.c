@@ -21,8 +21,8 @@ typedef struct {
 typedef struct {
     pthread_t *threads;              // pointer to the array of thread handles
     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
-    pthread_mutex_t mutex;       // job mutex lock
-    pthread_cond_t condition;         // job condition 
+    pthread_mutex_t mutex;           // job mutex lock
+    pthread_cond_t condition;        // job condition 
     unsigned int num_threads;        // number of threads 
     bool destroy_flag;               // destroy flag
 } ThreadPool_t;
@@ -71,11 +71,9 @@ void ThreadPool_destroy(ThreadPool_t *tp) {
 
     ThreadPool_check(tp);
 
-    //Lock mutex then signal to remaining threads to exit waiting
-    pthread_mutex_lock(&tp->mutex);
+    //Signal to remaining threads to exit waiting
     tp->destroy_flag = true;
     pthread_cond_broadcast(&tp->condition);
-    pthread_mutex_unlock(&tp->mutex);
 
     //Wait for threads to terminate
     for (unsigned int i = 0; i < tp->num_threads; i++) {
@@ -83,14 +81,6 @@ void ThreadPool_destroy(ThreadPool_t *tp) {
     }
     free(tp->threads);
     
-    //Ensure jobs removed (Not sure if need cuz of check ?)
-    // ThreadPool_job_t *job = tp->jobs.head;
-    // while (job) {
-    //     ThreadPool_job_t *temp_job = job;
-    //     job = job->next;
-    //     free(temp_job);
-    // }
-
     //Destroy Mutex, condition and free memory
     pthread_mutex_destroy(&tp->mutex);
     pthread_cond_destroy(&tp->condition);
@@ -177,11 +167,16 @@ ThreadPool_job_t *ThreadPool_get_job(ThreadPool_t *tp) {
 *     tp - Pointer to the ThreadPool object containing this thread
 */
 void *Thread_run(ThreadPool_t *tp) {
-    //Breaks once no more jobs are available
-    ThreadPool_job_t *job;
-    while ((job = ThreadPool_get_job(tp)) != NULL) {
-        job->func(job->arg);
-        free(job);
+    while (!tp->destroy_flag) {
+        while (tp->jobs.size == 0)
+        {
+            pthread_cond_wait(&tp->condition, &tp->mutex);
+        }
+        ThreadPool_job_t *job = ThreadPool_get_job(tp);
+        if(job != NULL) { 
+            job->func(job->arg);
+            free(job);
+        }
     }
     return NULL;
 }

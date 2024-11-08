@@ -9,19 +9,21 @@ typedef struct ThreadPool_job_t {
     thread_func_t func;              // function pointer
     void *arg;                       // arguments for that function
     struct ThreadPool_job_t *next;   // pointer to the next job in the queue
-    // add other members if needed
 } ThreadPool_job_t;
 
 typedef struct {
-    unsigned int size;               // no. jobs in the queue
+    unsigned int size;               // jobs in the queue
     ThreadPool_job_t *head;          // pointer to the first (shortest) job
-    // add other members if needed
+    ThreadPool_job_t *tail;          // pointer to the last job
 } ThreadPool_job_queue_t;
 
 typedef struct {
     pthread_t *threads;              // pointer to the array of thread handles
     ThreadPool_job_queue_t jobs;     // queue of jobs waiting for a thread to run
-    // add other members if needed
+    pthread_mutex_t mutex;           // job mutex lock
+    pthread_cond_t condition;        // job condition 
+    unsigned int num_threads;        // number of threads 
+    bool destroy_flag;               // destroy flag
 } ThreadPool_t;
 
 
