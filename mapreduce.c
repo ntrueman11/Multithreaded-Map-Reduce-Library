@@ -1,12 +1,12 @@
-#ifndef MAPREDUCE_H
-#define MAPREDUCE_H
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "threadpool.h"
 #include <sys/stat.h>
-
+#include "mapreduce.h"
+#include <ctype.h>
 // function pointer typedefs
 typedef void (*Mapper)(char *file_name);
 typedef void (*Reducer)(char *key, unsigned int partition_idx);
@@ -31,14 +31,23 @@ typedef struct {
 } MR_Reduce_Args;
 
 typedef struct {
-    char *file_name;
-    off_t file_size;
+    char *filename;
+    unsigned int file_size;
 } File;
+
 // Globals for Partitions
+
 Partition *partition;
 unsigned int num_partitions;
+Dictionary **curr_partition_arr;
 
-// library functions that must be implemented
+
+int compare_size(const void *a, const void *b)
+{
+    File *file = (File *)a;
+    File *file2 = (File *)b;
+    return (file->file_size - file2->file_size);
+}
 
 /**
 * Run the MapReduce framework
@@ -51,9 +60,10 @@ unsigned int num_partitions;
 *     num_parts    - Number of partitions to be created
 */
 void MR_Run(unsigned int file_count, char *file_names[], Mapper mapper, Reducer reducer, unsigned int num_workers, unsigned int num_parts) {
-    
-    partition = malloc(sizeof(Partition) * num_parts);
-    for (unsigned int i = 0; i < num_parts; i++) {
+    num_partitions = num_parts;
+    partition = malloc(sizeof(Partition) * num_partitions);
+    curr_partition_arr = malloc(sizeof(Dictionary*)*num_partitions);
+    for (unsigned int i = 0; i < num_partitions; i++) {
         partition[i].head = NULL;
         partition[i].tail = NULL;
         partition[i].position = NULL;
@@ -63,42 +73,41 @@ void MR_Run(unsigned int file_count, char *file_names[], Mapper mapper, Reducer 
     // Initialize the thread pool
     ThreadPool_t *tp = ThreadPool_create(num_workers);
 
-    // Array to store jobs with file sizes
-    File files[file_count];
     struct stat file_stat;
-    for (unsigned int i = 0; i < file_count; i++) {
-        
-        if (stat(file_names[i], &file_stat) == 0) {
-            files[i].file_name = file_names[i];
-            files[i].file_size = file_stat.st_size;
-        } 
-    }
-    sort_files(files, file_count);
+    File *file = malloc(file_count * sizeof(File));
+    for (unsigned int i = 0; i < file_count; i++)
+    {
+        file[i].filename = file_names[i];
 
+        // Get the size of the file using stat
+        if (stat(file_names[i], &file_stat) == 0)
+        {
+            file[i].file_size= file_stat.st_size;
+        }
+        else
+        {
+            file[i].file_size = 0; 
+        }
+    }
+    qsort(file, file_count, sizeof(File), compare_size);
     // Submit map jobs to the thread pool in sorted order
     for (unsigned int i = 0; i < file_count; i++) {
-        ThreadPool_add_job(tp, (thread_func_t)mapper, files[i].file_name);
+        ThreadPool_add_job(tp, (thread_func_t)mapper, file[i].filename);
     }
+    ThreadPool_check(tp);
 
-    ThreadPool_destroy(tp);
 
-
-    // Create reducer threads, one for each partition
-    pthread_t reducer_t[num_parts];
-    for (unsigned int i = 0; i < num_parts; i++) {
+    for (unsigned int i = 0; i < num_partitions; i++) {
         MR_Reduce_Args *args = malloc(sizeof(MR_Reduce_Args));
         args->partition_idx = i;
         args->reducer = reducer;
-
-        pthread_create(&reducer_t[i], NULL, MR_Reduce, args);
+        ThreadPool_add_job(tp, MR_Reduce, args);
     }
+    ThreadPool_destroy(tp);
 
-    for (unsigned int i = 0; i < num_parts; i++) {
-        pthread_join(reducer_t[i], NULL);
-    }
 
     // Clean up partitions and mutexes
-    for (unsigned int i = 0; i < num_parts; i++) {
+    for (unsigned int i = 0; i < num_partitions; i++) {
         pthread_mutex_destroy(&partition[i].mutex);
         Dictionary *current = partition[i].head;
         while (current) {
@@ -109,7 +118,9 @@ void MR_Run(unsigned int file_count, char *file_names[], Mapper mapper, Reducer 
             free(temp);
         }
     }
+    free(file);
     free(partition);
+    free(curr_partition_arr);
 }
 
 /**
@@ -120,23 +131,20 @@ void MR_Run(unsigned int file_count, char *file_names[], Mapper mapper, Reducer 
 */
 void MR_Emit(char *key, char *value) {
 
-    // Determine the partition using the partitioning function
     unsigned int index = MR_Partitioner(key, num_partitions);
-
     pthread_mutex_lock(&partition[index].mutex);
 
     Dictionary *dict = malloc(sizeof(Dictionary));
-    // Duplicate the key and value strings
+
     dict->key = strdup(key); 
     dict->value = strdup(value);
     dict->next = NULL;
 
-    // Insert the new node at the end of the list
+    // // Insert the new node at the end of the list
     if (partition[index].head == NULL) {
         partition[index].head = dict;
         partition[index].tail = dict;
     } else {
-        // Send to the end
         partition[index].tail->next = dict;
         partition[index].tail = dict;
     }
@@ -152,7 +160,7 @@ void MR_Emit(char *key, char *value) {
 * Return:
 *     unsigned int  - Index of the partition
 */
-unsigned long MR_Partitioner(char *key, int num_partitions) {
+unsigned int MR_Partitioner(char *key, unsigned int num_partitions) {
     unsigned long hash = 5381;
     int c;
     while ((c = *key++) != '\0')
@@ -173,25 +181,16 @@ void MR_Reduce(void *threadarg) {
     MR_Reduce_Args *args = (MR_Reduce_Args *)threadarg;
     unsigned int partition_idx = args->partition_idx;
     Reducer reducer = args->reducer;
-    
-    Partition *part = &partition[partition_idx];
+    curr_partition_arr[partition_idx] = partition[partition_idx].head; // Start from head
 
-    pthread_mutex_lock(&part->mutex);
-    Dictionary *current_item = part->head;
-    pthread_mutex_unlock(&part->mutex);
-
-    while (current_item != NULL) {
-
-        char *key = current_item->key;
-
+    while (curr_partition_arr[partition_idx] != NULL) {
+        char *key = curr_partition_arr[partition_idx]->key;
         reducer(key, partition_idx);
 
-        //Find next unique key to reduce
-        pthread_mutex_lock(&part->mutex);
-        while (current_item != NULL && strcmp(current_item->key, key) == 0) {
-            current_item = current_item->next;
+        // Move to the next unique key
+        while (curr_partition_arr[partition_idx] != NULL && strcmp(curr_partition_arr[partition_idx]->key, key) == 0) {
+            curr_partition_arr[partition_idx] = curr_partition_arr[partition_idx]->next;
         }
-        pthread_mutex_unlock(&part->mutex);
     }
 
     free(args);
@@ -207,49 +206,17 @@ void MR_Reduce(void *threadarg) {
 *     NULL          - Otherwise
 */
 char *MR_GetNext(char *key, unsigned int partition_idx) {
-    Partition *part = &partition[partition_idx];
+    Dictionary *current_node = curr_partition_arr[partition_idx];
 
-    pthread_mutex_lock(&part->mutex);
+    while (current_node != NULL) {
+        if (strcmp(current_node->key, key) == 0) {
+            curr_partition_arr[partition_idx] = current_node->next;
+            return strdup(current_node->value);
+        } else if (strcmp(current_node->key, key) > 0) {
+            return NULL;
+        }
+        current_node = current_node->next;
+    }
+    return NULL;
     
-    if (part->position == NULL || strcmp(part->position->key, key) != 0) {
-        //Start at head
-        part->position = part->head;
-
-        //Find postions with same key
-        while (part->position != NULL && strcmp(part->position->key, key) != 0) {
-            part->position = part->position->next;
-        }
-    }
-
-    // No matching key
-    if (part->position == NULL) {
-        pthread_mutex_unlock(&part->mutex);
-        return NULL;
-    }
-
-    // Store the value to return
-    char *key_val = part->position->value;
-
-    //Saves position for next call to function
-    part->position = part->position->next;
-    while (part->position != NULL && strcmp(part->position->key, key) != 0) {
-        part->position = part->position->next;
-    }
-
-    pthread_mutex_unlock(&part->mutex);
-    return key_val;
 }
-
-void sort_files(File *files, unsigned int file_count) {
-
-    for (unsigned int i = 0; i < file_count - 1; i++) {
-        for (unsigned int j = i + 1; j < file_count; j++) {
-            if (files[i].file_size > files[j].file_size) {
-                File temp = files[i];
-                files[i] = files[j];
-                files[j] = temp;
-            }
-        }
-    }
-}
-#endif
