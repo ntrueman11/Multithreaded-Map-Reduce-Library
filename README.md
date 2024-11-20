@@ -44,19 +44,14 @@ This partition structure allows the MapReduce framework to organize data into se
 
 The implementation was tested using various input files and scenarios to validate its correctness and performance:
 
-1. **Word Count Test**:
-   - The `distwc.c` file includes a sample word count application.
-   - The `Map` function parses each word in the input files and emits them with a value of "1".
-   - The `Reduce` function counts the occurrences of each word by summing up values for each unique key.
-
-2. **Concurrency and Thread Safety**:
+1. **Concurrency and Thread Safety**:
    - To test concurrency, multiple files of varying sizes were processed simultaneously. This ensured that the thread pool correctly distributed `Map` and `Reduce` tasks across multiple threads.
    - Valgrind was used to check for memory leaks and synchronization errors, confirming that all allocated resources were properly freed and that there were no data races.
 
-3. **Partition Validation**:
+2. **Partition Validation**:
    - The partitioning function was tested to ensure that each key-value pair was assigned to the correct partition based on the partition index. 
    - The partitioned data was reviewed to ensure that each partition contained the expected data.
 
-4. **Error Handling**:
+3. **Error Handling**:
    - The program was tested with various error scenarios, such as non-existent input files, to confirm that it handled errors gracefully.
 
